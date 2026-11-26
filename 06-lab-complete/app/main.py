@@ -7,34 +7,54 @@ Hoàn thành các TODO để đạt đủ 12 tiêu chí trong README.md, rồi k
 Bản khung này chạy được (uvicorn app.main:app) nhưng chưa đạt tiêu chí nào.
 """
 import logging
+import time
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, Request
 from pydantic import BaseModel, Field
 
+from app.auth import verify_api_key
+from app.logging_config import setup_logging
 from utils.mock_llm import ask as llm_ask
 
-# TODO (tiêu chí 10 — Structured logging):
-#   Mỗi dòng log của app phải là 1 JSON object hợp lệ, vd
-#   {"ts": "...", "lvl": "INFO", "event": "request", "path": "/ask", "status": 200, "ms": 12.3}
-#   Gợi ý: tự viết logging.Formatter dùng json.dumps.
-logging.basicConfig(level=logging.INFO)
+setup_logging()
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Production AI Agent")
+
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    """Mỗi request một dòng log. Không ghi header, query hay body để tránh lộ secret."""
+    start = time.perf_counter()
+    status = 500  # giữ nguyên nếu handler ném exception
+    try:
+        response = await call_next(request)
+        status = response.status_code
+        return response
+    finally:
+        logger.info("request", extra={"fields": {
+            "method": request.method,
+            "path": request.url.path,
+            "status": status,
+            "ms": round((time.perf_counter() - start) * 1000, 1),
+        }})
 
 
 class AskRequest(BaseModel):
     question: str = Field(..., min_length=1, max_length=2000)
 
 
-# TODO (tiêu chí 4): GET /health — liveness: luôn trả 200 khi process còn chạy
-#                    (kể cả khi Redis chưa kết nối được)
+@app.get("/health")
+def health():
+    """Liveness: process còn chạy thì trả 200, không phụ thuộc Redis."""
+    return {"status": "ok"}
+
+
 # TODO (tiêu chí 5): GET /ready  — readiness: 200 khi sẵn sàng, 503 khi Redis không kết nối được
 
 
 @app.post("/ask")
-def ask(body: AskRequest):
-    # TODO (tiêu chí 6): bắt buộc header X-API-Key → thêm Depends(verify_api_key)
+def ask(body: AskRequest, api_key: str = Depends(verify_api_key)):
     # TODO (tiêu chí 7): check_rate_limit(...) → 429 khi vượt giới hạn
     # TODO (tiêu chí 8): check_budget() trước khi gọi LLM, record_cost(...) sau khi gọi → 402 khi hết budget
     answer = llm_ask(body.question)
