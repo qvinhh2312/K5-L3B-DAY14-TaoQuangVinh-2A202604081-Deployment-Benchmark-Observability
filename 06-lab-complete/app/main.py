@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 
 from app.auth import verify_api_key
 from app.logging_config import setup_logging
+from app.rate_limiter import check_rate_limit
 from app.redis_client import redis_healthy
 from utils.mock_llm import ask as llm_ask
 
@@ -61,7 +62,7 @@ def ready():
 
 @app.post("/ask")
 def ask(body: AskRequest, api_key: str = Depends(verify_api_key)):
-    # TODO (tiêu chí 7): check_rate_limit(...) → 429 khi vượt giới hạn
+    check_rate_limit(api_key)
     # TODO (tiêu chí 8): check_budget() trước khi gọi LLM, record_cost(...) sau khi gọi → 402 khi hết budget
     answer = llm_ask(body.question)
     return {"question": body.question, "answer": answer}
