@@ -9,11 +9,12 @@ Bản khung này chạy được (uvicorn app.main:app) nhưng chưa đạt tiê
 import logging
 import time
 
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from app.auth import verify_api_key
 from app.logging_config import setup_logging
+from app.redis_client import redis_healthy
 from utils.mock_llm import ask as llm_ask
 
 setup_logging()
@@ -50,7 +51,12 @@ def health():
     return {"status": "ok"}
 
 
-# TODO (tiêu chí 5): GET /ready  — readiness: 200 khi sẵn sàng, 503 khi Redis không kết nối được
+@app.get("/ready")
+def ready():
+    """Readiness: chỉ nhận traffic khi kết nối được Redis."""
+    if not redis_healthy():
+        raise HTTPException(status_code=503, detail="Redis is not available")
+    return {"status": "ready"}
 
 
 @app.post("/ask")
