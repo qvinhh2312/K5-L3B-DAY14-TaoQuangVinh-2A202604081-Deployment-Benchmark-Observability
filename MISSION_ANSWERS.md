@@ -298,6 +298,132 @@ nginx-1  | 172.20.0.1 - - [26/Nov/2026:08:49:53 +0000] "POST /ask HTTP/1.1" 200 
 - Cổng 443 được map nhưng `nginx.conf` chỉ `listen 80`, nên chưa có HTTPS.
 - Dòng log `request` không phải JSON hợp lệ, cùng lỗi như ở Part 1.
 
+## Part 4: API Security
+
+### Exercise 4.1: API Key authentication
+
+File xét: `04-api-gateway/develop/app.py`.
+
+- **Key được kiểm tra ở đâu:** hàm `verify_api_key` (dòng 39–54) đọc header `X-API-Key`, so với biến môi trường `AGENT_API_KEY` (dòng 35). `/ask` gắn hàm này qua `Depends` (dòng 70). `/health` và `/` không cần key.
+- **Sai key thì sao:** thiếu key trả 401, sai key trả 403, request không tới được agent.
+- **Rotate key:** đổi giá trị `AGENT_API_KEY` rồi khởi động lại, không cần sửa code. Muốn không gián đoạn thì cho server nhận cả key cũ và key mới trong thời gian chuyển đổi, sau đó bỏ key cũ.
+- **Điểm yếu:** có key mặc định trong code (dòng 35) và in key ra màn hình lúc khởi động (dòng 91).
+
+```text
+$ curl -i -X POST $U -H "Content-Type: application/json" -d "$B"; echo
+HTTP/1.1 401 Unauthorized
+{"detail":"Missing API key. Include header: X-API-Key: <your-key>"}
+
+$ curl -i -X POST $U -H "X-API-Key: wrong" -H "Content-Type: application/json" -d "$B"; echo
+HTTP/1.1 403 Forbidden
+{"detail":"Invalid API key."}
+
+$ curl -i -X POST $U -H "X-API-Key: <key>" -H "Content-Type: application/json" -d "$B"; echo
+HTTP/1.1 200 OK
+{"question":"Hello","answer":"Agent đang hoạt động tốt! (mock response) Hỏi thêm câu hỏi đi nhé."}
+```
+
+Trong đó `U=http://localhost:8000/ask`, `B='{"question":"Hello"}'`.
+
+### Exercise 4.2: JWT authentication
+
+Luồng trong `04-api-gateway/production/auth.py`:
+
+1. `POST /auth/token` với username, password; `authenticate_user` (dòng 70–75) kiểm tra.
+2. `create_token` (dòng 35–43) ký token HS256 chứa `sub`, `role`, `iat`, `exp` (hết hạn sau 60 phút).
+3. Client gửi `Authorization: Bearer <token>`.
+4. `verify_token` (dòng 46–67) kiểm tra chữ ký và hạn, lấy user và role mà không cần tra database. Theo code: thiếu token hoặc hết hạn trả 401, token sai trả 403.
+
+```text
+$ curl -i -X POST $U -H "Content-Type: application/json" -d "$B"; echo
+HTTP/1.1 401 Unauthorized
+date: Thu, 26 Nov 2026 09:00:31 GMT
+www-authenticate: Bearer
+{"detail":"Authentication required. Include: Authorization: Bearer <token>"}
+
+$ TOKEN=$(curl -s -X POST http://localhost:8000/auth/token -H "Content-Type: application/json" \
+    -d '{"username":"student","password":"demo123"}' \
+    | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
+
+$ curl -i -X POST $U -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "$B"; echo
+HTTP/1.1 200 OK
+date: Thu, 26 Nov 2026 09:00:54 GMT
+{"question":"Hello","answer":"Tôi là AI agent được deploy lên cloud. Câu hỏi của bạn đã được nhận.","usage":{"requests_remaining":9,"budget_remaining_usd":1.8e-05}}
+```
+
+Điểm yếu của bản demo: `JWT_SECRET` có giá trị mặc định trong code (dòng 22), mật khẩu lưu dạng rõ (dòng 27–30), token đã cấp không thu hồi được trước khi hết hạn.
+
+### Exercise 4.3: Rate limiting
+
+- **Thuật toán:** sliding window lưu timestamp từng request trong `deque` (`rate_limiter.py` 29–71). Mỗi lần gọi, bỏ các mốc cũ hơn 60 giây rồi đếm. Comment gọi là "Sliding Window Counter" nhưng cách làm thực tế là sliding window log.
+- **Giới hạn:** user 10 request/phút, admin 100 request/phút (dòng 86–87).
+- **Admin:** không bỏ qua hoàn toàn; `app.py` 141 chọn limiter theo `role` trong token, nên tài khoản `teacher` có mức 100. Role nằm trong token đã ký nên client không tự sửa được nếu không biết secret.
+
+```text
+$ for i in {1..20}; do echo -n "request $i: "; curl -s -o /dev/null -w '%{http_code}\n' -X POST $U \
+    -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "$B"; done
+request 1: 200
+request 2: 200
+request 3: 200
+request 4: 200
+request 5: 200
+request 6: 200
+request 7: 200
+request 8: 200
+request 9: 200
+request 10: 429
+request 11: 429
+request 12: 429
+request 13: 429
+request 14: 429
+request 15: 429
+request 16: 429
+request 17: 429
+request 18: 429
+request 19: 429
+request 20: 429
+
+$ curl -i -X POST $U -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "$B"; echo
+HTTP/1.1 429 Too Many Requests
+date: Thu, 26 Nov 2026 09:01:05 GMT
+x-ratelimit-limit: 10
+x-ratelimit-remaining: 0
+x-ratelimit-reset: 1795683726
+retry-after: 49
+{"detail":{"error":"Rate limit exceeded","limit":10,"window_seconds":60,"retry_after_seconds":49}}
+```
+
+- 429 bắt đầu từ request 10 của vòng lặp vì lệnh curl trước đó đã dùng 1 trong 10 lượt.
+- `retry-after: 49` là thời gian còn lại đến khi request cũ nhất (lúc 09:00:54) ra khỏi cửa sổ 60 giây.
+- Request bị 429 không được ghi vào cửa sổ (dòng 65 chỉ chạy khi chưa vượt).
+
+### Exercise 4.4: Cost guard
+
+**Cách code hiện tại làm** (`cost_guard.py`):
+
+1. Trước khi gọi LLM, `check_budget` (dòng 60–91): chi phí cả hệ thống đạt $10 thì trả 503; chi phí của user trong ngày đạt $1 thì trả 402; từ 80% thì ghi cảnh báo.
+2. Sau khi gọi LLM, `record_usage` (dòng 93–110) cộng token và chi phí: $0.00015 / 1K token input, $0.0006 / 1K token output.
+3. Bản ghi theo user được tạo mới khi sang ngày khác (dòng 53–58).
+
+```text
+$ curl -s http://localhost:8000/me/usage -H "Authorization: Bearer $TOKEN"; echo
+{"user_id":"student","date":"2026-11-26","requests":10,"input_tokens":20,"output_tokens":308,"cost_usd":0.000188,"budget_usd":1.0,"budget_remaining_usd":0.999812,"budget_used_pct":0.0}
+```
+
+- `requests: 10` đúng bằng số request trả 200; request bị 429 không tốn tiền.
+- Kiểm tra: 20 / 1000 × 0.00015 + 308 / 1000 × 0.0006 ≈ $0.000188.
+
+**Hạn chế quan sát và đọc được**
+
+- Trường `budget_remaining_usd` trong response của `/ask` thực ra là số **đã dùng** (`app.py` 160): response báo `1.8e-05` trong khi `/me/usage` cho thấy còn lại gần $1.
+- `_global_cost` chỉ được cộng, không có code reset theo ngày, nên ngân sách chung chỉ về 0 khi khởi động lại.
+- Dữ liệu nằm trong RAM: restart là mất, chạy nhiều instance thì mỗi instance đếm riêng.
+- Kiểm tra trước, ghi sau nên nhiều request đồng thời có thể cùng lọt qua và vượt ngân sách.
+
+**Đề xuất cho production (chưa chạy thử):** lưu tổng chi phí trong Redis với key theo user và ngày, cộng bằng `INCRBYFLOAT`, đặt TTL; muốn không vượt khi có request đồng thời thì giữ trước chi phí ước tính bằng một Lua script (kiểm tra và cộng trong một bước), sau đó điều chỉnh theo chi phí thật.
+
+**Vì sao cần cả rate limit và cost guard:** rate limit giới hạn tốc độ gọi, bảo vệ server; cost guard giới hạn tổng tiền. Gọi chậm đều vẫn có thể tiêu hết ngân sách, còn một đợt gọi dồn dập có thể làm quá tải trước khi chạm ngân sách.
+
 ## AI log
 
 | Hỏi gì | Nhận gì | Tôi tự sửa và kiểm tra thế nào |
@@ -305,3 +431,4 @@ nginx-1  | 172.20.0.1 - - [26/Nov/2026:08:49:53 +0000] "POST /ask HTTP/1.1" 200 
 | Hỏi Claude kiểm tra lệnh khớp bài chưa | Đã khớp; gán giúp lệnh chạy | Tự chạy các lệnh trong WSL.  |
 | Nhờ Claude kiểm tra và hoàn thiện Part 1 | Claude đề xuất thí nghiệm SIGTERM; soạn Exercise 1.1, 1.2, 1.3 (bảng, nhận xét, phân tích lỗi) từ code trong repo và output tôi chạy | Tự chạy các lệnh và thí nghiệm trong WSL. |
 | Nhờ Claude hoàn thiện Part 2 | Claude soạn Exercise 2.1–2.4 (câu trả lời, bảng kích thước, sơ đồ, nhận xét) từ code trong repo và output tôi chạy; Claude chạy `docker history` trên máy này để phân tích layer | Tự chạy build, container và Docker Compose trong WSL. |
+| Hỏi Claude cách chạy Part 4, sửa lỗi chạy nhầm server, và soạn bài | Claude chỉ ra server đang chạy sai thư mục; soạn Exercise 4.1–4.4 từ code trong repo và output tôi chạy | Tự chạy các lệnh curl cho bản develop và production trong WSL. |
