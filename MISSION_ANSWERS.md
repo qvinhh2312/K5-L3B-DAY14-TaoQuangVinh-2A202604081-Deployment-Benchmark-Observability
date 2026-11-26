@@ -298,6 +298,53 @@ nginx-1  | 172.20.0.1 - - [26/Nov/2026:08:49:53 +0000] "POST /ask HTTP/1.1" 200 
 - Cổng 443 được map nhưng `nginx.conf` chỉ `listen 80`, nên chưa có HTTPS.
 - Dòng log `request` không phải JSON hợp lệ, cùng lỗi như ở Part 1.
 
+## Part 3: Cloud Deployment
+
+### Exercise 3.1: Railway deployment
+
+- **URL:** https://agent-production-8adbaa12.up.railway.app
+- Deploy agent Part 6 (`06-lab-complete/`) kèm một service Redis. Chi tiết trong [DEPLOYMENT.md](DEPLOYMENT.md).
+- Ảnh: [dashboard](screenshots/dashboard.png), [service đang chạy](screenshots/running.png), [kết quả test](screenshots/test.png).
+
+| Request tới URL public | Mã HTTP |
+|---|---|
+| `GET /health` | 200 |
+| `GET /ready` | 200 |
+| `POST /ask` không có key | 401 |
+| `POST /ask` có `X-API-Key` | 200 |
+
+### Exercise 3.2: So sánh `railway.toml` với `render.yaml`
+
+So sánh hai file trong `06-lab-complete/`. Chỉ deploy lên Railway; `render.yaml` chưa chạy thử trên Render.
+
+| Tiêu chí | `railway.toml` | `render.yaml` |
+|---|---|---|
+| Định dạng | TOML | YAML |
+| Phạm vi | Cấu hình build và deploy của **một** service | Blueprint khai báo **cả hạ tầng**: web service và Key Value (Redis) |
+| Cách build | `builder = "DOCKERFILE"`, `dockerfilePath` | `runtime: docker`, `rootDir: 06-lab-complete` |
+| Health check | `healthcheckPath`, `healthcheckTimeout` | `healthCheckPath` |
+| Tạo Redis | Ngoài file: `railway add --database redis` | Trong file: service `type: keyvalue` |
+| Nối agent với Redis | Biến `REDIS_URL=${{Redis.REDIS_URL}}` đặt bằng CLI | `fromService` lấy `connectionString` |
+| Biến môi trường, secret | Đặt trên nền tảng, không nằm trong file | Khai báo trong `envVars`; secret dùng `generateValue: true` nên giá trị không nằm trong git |
+| Region, gói | Không khai báo trong file | `region`, `plan` |
+| Restart | `restartPolicyType`, `restartPolicyMaxRetries` | Không khai báo, do Render quản lý |
+
+**Vì sao khác:** `railway.toml` chỉ mô tả cách build và chạy một service, còn tài nguyên và biến được quản lý trên project. Blueprint của Render theo hướng Infrastructure as Code: một file đủ để dựng lại toàn bộ hệ thống, đổi lại file phải khai báo nhiều hơn. Khi deploy, Railway CLI cũng cảnh báo `railway.toml` đã deprecated và khuyên chuyển sang Infrastructure as Code.
+
+Hai file mẫu trong `03-cloud-deployment/` khác bản trên ở cách build: Railway dùng `NIXPACKS` với `startCommand`, Render dùng `runtime: python` với `buildCommand`, tức không dùng Dockerfile.
+
+### Exercise 3.3: Pipeline CI/CD Cloud Run
+
+Đọc `cloudbuild.yaml` và `service.yaml` (không deploy):
+
+1. **Test:** cài dependencies và chạy `pytest`; các bước nối nhau bằng `waitFor`, nên test lỗi thì dừng pipeline.
+2. **Build:** tạo Docker image gắn tag `$COMMIT_SHA` và `latest`, dùng `--cache-from` để tận dụng layer cũ.
+3. **Push:** đẩy image lên Container Registry (`gcr.io`).
+4. **Deploy:** `gcloud run deploy` bản `$COMMIT_SHA` tại `asia-southeast1`, 1–10 instance, 512Mi, secret lấy từ Secret Manager.
+5. `service.yaml` mô tả service: concurrency 80, giới hạn tài nguyên, liveness probe `/health`, startup probe `/ready`.
+
+Bước test cần `requirements.txt` và thư mục `tests/`, hiện không có trong `production-cloud-run/`.
+
 ## Part 4: API Security
 
 ### Exercise 4.1: API Key authentication
@@ -582,3 +629,4 @@ Chạy thử cả stack bằng `docker compose -p k5-day14-lab up -d --build`:
 | Hỏi Claude cách chạy Part 4, sửa lỗi chạy nhầm server, và soạn bài | Claude chỉ ra server đang chạy sai thư mục; soạn Exercise 4.1–4.4 từ code trong repo và output tôi chạy | Tự chạy các lệnh curl cho bản develop và production trong WSL. |
 | Nhờ Claude tự thực hiện phần còn lại của Part 5 và soạn bài | Claude viết script cho thí nghiệm SIGTERM (5.2) và kill instance (5.5), chạy thử trên máy này; soạn Exercise 5.1–5.5 | Tự chạy health/ready, Docker Compose 3 instance, `test_stateless.py` và tự chạy lại script; số liệu 5.2 và phần kill instance lấy từ lần tôi chạy. |
 | Nhờ Claude làm Part 6 từng bước | Claude viết code trong `06-lab-complete/app/`, `Dockerfile`, `.dockerignore`, `docker-compose.yml`, `railway.toml`, `render.yaml`, `.env.example` theo 9 bước kèm giải thích; chạy `check_production_ready.py` để kiểm tra | Tự kiểm tra trong WSL: đọc config từ env, API key (401/200), tắt Redis (`/ready` 503), rate limit (429), cost guard (402), SIGTERM, `docker build`/`run`/`stop`, Docker Compose và `check_production_ready.py` PASS 12/12. |
+| Nhờ Claude hướng dẫn deploy Railway, xử lý lỗi 401 và soạn Part 3 | Claude đưa lệnh Railway; kiểm tra độ dài biến trên Railway và gọi thử `/ask` để tìm lỗi; kiểm tra ảnh; soạn `DEPLOYMENT.md` và mục Part 3 | Tự deploy, tự chạy 4 lệnh kiểm tra trên URL public và tự chụp 3 ảnh. |
