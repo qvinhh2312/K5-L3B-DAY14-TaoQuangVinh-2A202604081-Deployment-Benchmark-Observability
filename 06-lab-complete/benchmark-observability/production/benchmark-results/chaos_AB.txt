@@ -1,0 +1,54 @@
+=== Thí nghiệm AB
+Alert active trước khi đổi: {'LLMCostBurnRateHigh': 'firing'}
+--- Trước khi đổi (15:17:40)
+  request/s             : 18.05
+  error rate            : 0.01897
+  p50 (s)               : 0.1712
+  p95 (s)               : 0.2933
+  p99 (s)               : 1.844
+  avg (s)               : 0.2334
+  instances up          : 2
+  token/s theo loại     : input=1307; output=696
+  cost USD/giờ          : 2.278
+  retrieval hit ratio   : 0.8836
+  phiên bản             : mock-llm-small,v2=2
+T0 = 15:17:40 — bắt đầu thay đổi
+.env mới: MOCK_ERROR_RATE=0.2, MOCK_SLOW_RATE=0.3
+  +  13s (15:17:53)  AgentInstanceDown 172.20.0.7:8000: inactive -> pending
+  +  13s (15:17:53)  AgentInstanceDown 172.20.0.8:8000: inactive -> pending
+  +  13s (15:17:53)  AgentInstanceDown 172.20.0.9:8000: inactive -> pending
+  +  18s (15:17:58)  AgentInstanceDown 172.20.0.7:8000: pending -> inactive
+  +  18s (15:17:58)  AgentInstanceDown 172.20.0.8:8000: pending -> inactive
+  +  18s (15:17:58)  AgentInstanceDown 172.20.0.9:8000: pending -> inactive
+  +  23s (15:18:03)  AgentHighLatencyP95: inactive -> pending
+  +  28s (15:18:08)  AgentHighErrorRate: inactive -> pending
+  +  89s (15:19:09)  AgentHighErrorRate: pending -> firing
+  +  94s (15:19:14)  LLMCostBurnRateHigh: firing -> inactive
+  + 144s (15:20:04)  AgentHighLatencyP95: pending -> firing
+  >>> CHỤP ẢNH NGAY trang http://localhost:9090/alerts <<<
+--- Khi alert đã firing (15:20:04)
+  request/s             : 14.92
+  error rate            : 0.1869
+  p50 (s)               : 0.1949
+  p95 (s)               : 1.907
+  p99 (s)               : 1.981
+  avg (s)               : 0.6127
+  instances up          : 2
+  token/s theo loại     : input=893.1; output=475.1
+  cost USD/giờ          : 1.843
+  retrieval hit ratio   : 0.8861
+  phiên bản             : mock-llm-small,v2=2
+--- Cuối thời gian theo dõi (15:21:41)
+  request/s             : 14.81
+  error rate            : 0.2094
+  p50 (s)               : 0.1977
+  p95 (s)               : 1.903
+  p99 (s)               : 1.981
+  avg (s)               : 0.6045
+  instances up          : 2
+  token/s theo loại     : input=874; output=464.9
+  cost USD/giờ          : 1.582
+  retrieval hit ratio   : 0.8923
+  phiên bản             : mock-llm-small,v2=2
+Alert đang active khi kết thúc: {'AgentHighErrorRate': 'firing', 'AgentHighLatencyP95': 'firing'}
+XONG.

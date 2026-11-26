@@ -1,0 +1,36 @@
+=== Thí nghiệm reset
+Alert active trước khi đổi: {'LLMCostBurnRateHigh': 'firing'}
+--- Trước khi đổi (15:46:59)
+  request/s             : 5.259
+  error rate            : 0.01019
+  p50 (s)               : 0.409
+  p95 (s)               : 0.6456
+  p99 (s)               : 1.754
+  avg (s)               : 0.4631
+  instances up          : 2
+  token/s theo loại     : input=390.2; output=207.7
+  cost USD/giờ          : 9.574
+  retrieval hit ratio   : 0.8947
+  phiên bản             : mock-llm-large,v2=2
+  Locust                : 10 user; lỗi tích luỹ: 3426 x HTTPError('503 Server Error: Service Unavailable for url: /a; 477 x HTTPError('502 Server Error: Bad Gateway for url: /ask'); 38 x HTTPError('502 Server Error: Bad Gateway for url: /health'); 13 x HTTPError('504 Server Error: Gateway Time-out for url: /ask'
+T0 = 15:46:59 — bắt đầu thay đổi
+.env mới: (xoá, về mặc định)
+  +   7s (15:47:07)  AgentInstanceDown 172.20.0.8:8000: inactive -> pending
+  +  17s (15:47:17)  AgentInstanceDown 172.20.0.8:8000: pending -> inactive
+  + 273s (15:51:33)  LLMCostBurnRateHigh: firing -> inactive
+  Hết alert sau 273s.
+--- Cuối thời gian theo dõi (15:51:33)
+  request/s             : 6.054
+  error rate            : 0
+  p50 (s)               : 0.1789
+  p95 (s)               : 0.2942
+  p99 (s)               : 1.837
+  avg (s)               : 0.2348
+  instances up          : 2
+  token/s theo loại     : input=448.4; output=237.3
+  cost USD/giờ          : 1.7
+  retrieval hit ratio   : 0.8963
+  phiên bản             : mock-llm-small,v2=2
+  Locust                : 10 user; lỗi tích luỹ: 3437 x HTTPError('503 Server Error: Service Unavailable for url: /a; 549 x HTTPError('502 Server Error: Bad Gateway for url: /ask'); 45 x HTTPError('502 Server Error: Bad Gateway for url: /health'); 13 x HTTPError('504 Server Error: Gateway Time-out for url: /ask'
+Alert đang active khi kết thúc: không có
+XONG.

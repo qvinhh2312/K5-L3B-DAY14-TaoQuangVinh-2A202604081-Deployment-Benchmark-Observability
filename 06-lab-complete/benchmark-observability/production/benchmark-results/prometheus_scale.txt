@@ -1,0 +1,21 @@
+== scale_1 (cửa sổ 110s, kết thúc tại unix 1795700089)
+số instance nhận request: 1
+  172.20.0.7:8000: 6784 request /ask, CPU trung bình 0.176 core (giới hạn 0.5)
+latency /ask trung bình : 231.4 ms
+latency LLM trung bình  : 208.3 ms
+
+== scale_2 (cửa sổ 110s, kết thúc tại unix 1795699353)
+số instance nhận request: 2
+  172.20.0.7:8000: 3452 request /ask, CPU trung bình 0.103 core (giới hạn 0.5)
+  172.20.0.8:8000: 3454 request /ask, CPU trung bình 0.103 core (giới hạn 0.5)
+latency /ask trung bình : 229.8 ms
+latency LLM trung bình  : 207.8 ms
+
+== scale_3 (cửa sổ 110s, kết thúc tại unix 1795700231)
+số instance nhận request: 3
+  172.20.0.7:8000: 2257 request /ask, CPU trung bình 0.071 core (giới hạn 0.5)
+  172.20.0.8:8000: 2242 request /ask, CPU trung bình 0.072 core (giới hạn 0.5)
+  172.20.0.9:8000: 2262 request /ask, CPU trung bình 0.071 core (giới hạn 0.5)
+latency /ask trung bình : 233.8 ms
+latency LLM trung bình  : 211.7 ms
+

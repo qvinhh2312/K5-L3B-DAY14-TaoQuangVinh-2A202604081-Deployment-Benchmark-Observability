@@ -1,0 +1,50 @@
+=== Thí nghiệm C
+Alert active trước khi đổi: không có
+--- Trước khi đổi (15:42:26)
+  request/s             : 5.149
+  error rate            : 0
+  p50 (s)               : 0.1731
+  p95 (s)               : 0.2893
+  p99 (s)               : 1.722
+  avg (s)               : 0.2143
+  instances up          : 2
+  token/s theo loại     : input=385.4; output=205.1
+  cost USD/giờ          : 0.4173
+  retrieval hit ratio   : 0.8932
+  phiên bản             : mock-llm-small,v2=2
+  Locust                : 10 user; lỗi tích luỹ: 3403 x HTTPError('503 Server Error: Service Unavailable for url: /a; 395 x HTTPError('502 Server Error: Bad Gateway for url: /ask'); 31 x HTTPError('502 Server Error: Bad Gateway for url: /health'); 13 x HTTPError('504 Server Error: Gateway Time-out for url: /ask'
+T0 = 15:42:26 — bắt đầu thay đổi
+.env mới: LLM_MODEL=mock-llm-large
+  +  12s (15:42:39)  AgentInstanceDown 172.20.0.7:8000: inactive -> pending
+  +  17s (15:42:44)  AgentInstanceDown 172.20.0.7:8000: pending -> inactive
+  +  69s (15:43:35)  LLMCostBurnRateHigh: inactive -> pending
+  + 186s (15:45:33)  LLMCostBurnRateHigh: pending -> firing
+  >>> CHỤP ẢNH NGAY trang http://localhost:9090/alerts <<<
+--- Khi alert đã firing (15:45:33)
+  request/s             : 5.513
+  error rate            : 0.0162
+  p50 (s)               : 0.4079
+  p95 (s)               : 0.6256
+  p99 (s)               : 1.651
+  avg (s)               : 0.451
+  instances up          : 2
+  token/s theo loại     : input=404.4; output=214.4
+  cost USD/giờ          : 6.507
+  retrieval hit ratio   : 0.8992
+  phiên bản             : mock-llm-large,v2=2
+  Locust                : 10 user; lỗi tích luỹ: 3418 x HTTPError('503 Server Error: Service Unavailable for url: /a; 477 x HTTPError('502 Server Error: Bad Gateway for url: /ask'); 38 x HTTPError('502 Server Error: Bad Gateway for url: /health'); 13 x HTTPError('504 Server Error: Gateway Time-out for url: /ask'
+--- Cuối thời gian theo dõi (15:46:59)
+  request/s             : 5.259
+  error rate            : 0.01019
+  p50 (s)               : 0.409
+  p95 (s)               : 0.6456
+  p99 (s)               : 1.754
+  avg (s)               : 0.4631
+  instances up          : 2
+  token/s theo loại     : input=390.2; output=207.7
+  cost USD/giờ          : 9.568
+  retrieval hit ratio   : 0.8947
+  phiên bản             : mock-llm-large,v2=2
+  Locust                : 10 user; lỗi tích luỹ: 3426 x HTTPError('503 Server Error: Service Unavailable for url: /a; 477 x HTTPError('502 Server Error: Bad Gateway for url: /ask'); 38 x HTTPError('502 Server Error: Bad Gateway for url: /health'); 13 x HTTPError('504 Server Error: Gateway Time-out for url: /ask'
+Alert đang active khi kết thúc: {'LLMCostBurnRateHigh': 'firing'}
+XONG.

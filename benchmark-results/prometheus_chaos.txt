@@ -1,0 +1,58 @@
+== v2 small, 10 user (sau reset cuối): cửa sổ 240s kết thúc 15:51:33 UTC
+  token mỗi request theo loại       : input=74.04; output=39.31
+  cost mỗi request (USD)            : 3.469e-05
+  số request /ask                   : 1475
+  tỉ lệ request > 1 s               : 0.02524
+  số lần retrieval                  : hit=1314; miss=162.1
+
+== v1 small (thí nghiệm E): cửa sổ 220s kết thúc 15:41:23 UTC
+  token mỗi request theo loại       : input=36.47; output=19.74
+  cost mỗi request (USD)            : 1.731e-05
+  số request /ask                   : 1351
+  tỉ lệ request > 1 s               : 0.03869
+  số lần retrieval                  : (không có dữ liệu)
+
+== v2 large (thí nghiệm C): cửa sổ 240s kết thúc 15:46:59 UTC
+  token mỗi request theo loại       : input=74.19; output=39.33
+  cost mỗi request (USD)            : 0.0005787
+  số request /ask                   : 1287
+  tỉ lệ request > 1 s               : 0.01348
+  số lần retrieval                  : hit=1147; miss=137.8
+
+== Thí nghiệm E: p95 (cửa sổ 1 phút) và tỉ lệ request > 1 s
+-- 15:38:30
+  p95 (s)                           : 0.1975
+  tỉ lệ > 1 s                       : 0.01953
+-- 15:38:45
+  p95 (s)                           : 0.1983
+  tỉ lệ > 1 s                       : 0.03346
+-- 15:39:00
+  p95 (s)                           : 0.1998
+  tỉ lệ > 1 s                       : 0.04478
+-- 15:39:15
+  p95 (s)                           : 1
+  tỉ lệ > 1 s                       : 0.05
+-- 15:39:30
+  p95 (s)                           : 1.528
+  tỉ lệ > 1 s                       : 0.05294
+-- 15:39:45
+  p95 (s)                           : 0.1995
+  tỉ lệ > 1 s                       : 0.03955
+-- 15:40:00
+  p95 (s)                           : 0.1982
+  tỉ lệ > 1 s                       : 0.02919
+-- 15:40:15
+  p95 (s)                           : 0.1973
+  tỉ lệ > 1 s                       : 0.01795
+-- 15:40:30
+  p95 (s)                           : 0.1973
+  tỉ lệ > 1 s                       : 0.02041
+-- 15:40:45
+  p95 (s)                           : 0.199
+  tỉ lệ > 1 s                       : 0.03712
+-- 15:41:00
+  p95 (s)                           : 0.1995
+  tỉ lệ > 1 s                       : 0.04274
+-- 15:41:15
+  p95 (s)                           : 1.517
+  tỉ lệ > 1 s                       : 0.05172
