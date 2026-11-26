@@ -540,6 +540,38 @@ HTTP 200 time 60.191262s
 - Request `GET` mất **60,2 giây**, trùng với `proxy_connect_timeout` mặc định 60 giây của Nginx. Nguyên nhân nhiều khả năng (chưa kiểm tra log Nginx): `nginx.conf` phân giải `agent` lúc khởi động và không đặt timeout kết nối, nên Nginx vẫn thử IP của container đã chết, hết thời gian chờ mới chuyển sang instance khác. Có thể giảm bằng `proxy_connect_timeout` ngắn và `server agent:8000 resolve`.
 - `turn` báo 7 cho câu hỏi thứ 6: history được đọc sau khi đã thêm câu hiện tại rồi vẫn cộng 1 (`production/app.py` 154).
 
+## Part 6: Final Project
+
+Output của `python check_production_ready.py` (chạy đầy đủ, có Docker, trong `06-lab-complete/`):
+
+```text
+  📋 Checklist Deliverable
+     ✅ Dockerfile (multi-stage, < 500 MB)
+     ✅ docker-compose.yml (agent + redis)
+     ✅ .dockerignore
+     ✅ Health check endpoint (GET /health)
+     ✅ Readiness endpoint (GET /ready)
+     ✅ API Key authentication
+     ✅ Rate limiting
+     ✅ Cost guard
+     ✅ Config từ environment variables
+     ✅ Structured logging
+     ✅ Graceful shutdown
+     ✅ Public URL ready (Railway / Render config)
+----------------------------------------------------------------
+  Result: 12/12 tiêu chí đạt · 43/43 checks passed
+  🎉 PASS 12/12 — PRODUCTION READY! Deploy nào!
+```
+
+Chạy thử cả stack bằng `docker compose -p k5-day14-lab up -d --build`:
+
+| Request | Mã HTTP |
+|---|---|
+| `GET /health` | 200 |
+| `GET /ready` | 200 |
+| `POST /ask` không có key | 401 |
+| `POST /ask` có `X-API-Key` | 200 |
+
 ## AI log
 
 | Hỏi gì | Nhận gì | Tôi tự sửa và kiểm tra thế nào |
@@ -549,3 +581,4 @@ HTTP 200 time 60.191262s
 | Nhờ Claude hoàn thiện Part 2 | Claude soạn Exercise 2.1–2.4 (câu trả lời, bảng kích thước, sơ đồ, nhận xét) từ code trong repo và output tôi chạy; Claude chạy `docker history` trên máy này để phân tích layer | Tự chạy build, container và Docker Compose trong WSL. |
 | Hỏi Claude cách chạy Part 4, sửa lỗi chạy nhầm server, và soạn bài | Claude chỉ ra server đang chạy sai thư mục; soạn Exercise 4.1–4.4 từ code trong repo và output tôi chạy | Tự chạy các lệnh curl cho bản develop và production trong WSL. |
 | Nhờ Claude tự thực hiện phần còn lại của Part 5 và soạn bài | Claude viết script cho thí nghiệm SIGTERM (5.2) và kill instance (5.5), chạy thử trên máy này; soạn Exercise 5.1–5.5 | Tự chạy health/ready, Docker Compose 3 instance, `test_stateless.py` và tự chạy lại script; số liệu 5.2 và phần kill instance lấy từ lần tôi chạy. |
+| Nhờ Claude làm Part 6 từng bước | Claude viết code trong `06-lab-complete/app/`, `Dockerfile`, `.dockerignore`, `docker-compose.yml`, `railway.toml`, `render.yaml`, `.env.example` theo 9 bước kèm giải thích; chạy `check_production_ready.py` để kiểm tra | Tự kiểm tra trong WSL: đọc config từ env, API key (401/200), tắt Redis (`/ready` 503), rate limit (429), cost guard (402), SIGTERM, `docker build`/`run`/`stop`, Docker Compose và `check_production_ready.py` PASS 12/12. |
