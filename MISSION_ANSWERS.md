@@ -424,6 +424,122 @@ $ curl -s http://localhost:8000/me/usage -H "Authorization: Bearer $TOKEN"; echo
 
 **Vì sao cần cả rate limit và cost guard:** rate limit giới hạn tốc độ gọi, bảo vệ server; cost guard giới hạn tổng tiền. Gọi chậm đều vẫn có thể tiêu hết ngân sách, còn một đợt gọi dồn dập có thể làm quá tải trước khi chạm ngân sách.
 
+## Part 5: Scaling & Reliability
+
+### Exercise 5.1: Health checks
+
+File xét: `05-scaling-reliability/develop/app.py`.
+
+| Endpoint | Loại | Trả lời câu hỏi | Khi fail thì nền tảng làm gì |
+|---|---|---|---|
+| `GET /health` (104–144) | Liveness | Process còn sống không? | Restart container |
+| `GET /ready` (147–168) | Readiness | Nhận traffic được chưa? | Ngừng gửi request tới instance, không restart |
+
+```text
+$ curl -i http://localhost:8000/health; echo
+HTTP/1.1 200 OK
+{"status":"ok","uptime_seconds":5.8,"version":"1.0.0","environment":"development","timestamp":"2026-11-26T09:03:53.104848+00:00","checks":{"memory":{"status":"ok","used_percent":12.1}}}
+
+$ curl -i http://localhost:8000/ready; echo
+HTTP/1.1 200 OK
+{"ready":true,"in_flight_requests":1}
+```
+
+`in_flight_requests: 1` là chính request `/ready` đang được đếm.
+
+### Exercise 5.2: Graceful shutdown
+
+Gửi một request mất khoảng 3 giây, 0,5 giây sau gửi SIGTERM (chạy bằng script, server ở `PORT=8765`):
+
+```text
+request sent  09:16:12.985
+SIGTERM sent  09:16:13.485
+HTTP/1.1 200 OK
+{"answer":"Đây là câu trả lời từ AI agent (mock). Trong production, đây sẽ là response từ OpenAI/Anthropic."}
+response done 09:16:16.045
+server exit code 0
+```
+
+```text
+INFO:     Shutting down
+INFO:     127.0.0.1:53040 - "POST /ask?question=hello HTTP/1.1" 200 OK
+INFO:     Waiting for application shutdown.
+2026-11-26 09:16:16,142 INFO 🔄 Graceful shutdown initiated...
+2026-11-26 09:16:16,143 INFO ✅ Shutdown complete
+INFO:     Application shutdown complete.
+INFO:     Finished server process [4132]
+2026-11-26 09:16:16,144 INFO Received signal 15 — uvicorn will handle graceful shutdown
+```
+
+- Request đang chạy **không bị cắt**: SIGTERM đến khoảng 2,5 giây trước khi có response, vẫn nhận 200 và process thoát với exit code 0.
+- Việc chờ request do **uvicorn** làm (`timeout_graceful_shutdown=30`, dòng 198). Phần shutdown của `lifespan` chỉ chạy sau khi request xong, nên vòng lặp chờ (dòng 58–64) không in dòng `Waiting for ... in-flight` nào.
+- Do đó `_is_ready = False` cũng chỉ được đặt sau khi request xong, không phải ngay lúc nhận SIGTERM.
+- `Received signal 15` in cuối cùng: handler tự đăng ký được gọi lại sau khi uvicorn tắt xong.
+- Đọc từ code: `/ask` là `async def` nhưng gọi hàm mock dùng `time.sleep`, nên trong 3 giây đó event loop bị chặn.
+
+### Exercise 5.3: Stateless design
+
+- **Vấn đề:** nếu history nằm trong RAM, mỗi instance chỉ thấy phần của mình; request sau rơi vào instance khác là mất ngữ cảnh, restart là mất sạch.
+- **Cách làm trong `production/app.py`:** session lưu ở Redis với key `session:<id>`, TTL 1 giờ (dòng 59–90). Instance nào cũng đọc ghi được.
+- **Hạn chế đọc từ code:**
+  - Không kết nối được Redis lúc khởi động thì tự chuyển sang dict trong RAM (dòng 35–45), nhiều instance sẽ sai mà không báo lỗi.
+  - `append_to_history` đọc rồi ghi lại cả session, hai request đồng thời cùng session có thể ghi đè nhau.
+  - `/health` vẫn trả 200 khi Redis mất (`status: degraded`).
+
+### Exercise 5.4: Load balancing
+
+```text
+$ docker compose -p k5-day14-scaling up -d --build --scale agent=3
+$ docker compose -p k5-day14-scaling ps
+NAME                       STATUS                    PORTS
+k5-day14-scaling-agent-1   Up 36 seconds (healthy)   8000/tcp
+k5-day14-scaling-agent-2   Up 36 seconds (healthy)   8000/tcp
+k5-day14-scaling-agent-3   Up 36 seconds (healthy)   8000/tcp
+k5-day14-scaling-nginx-1   Up 36 seconds             0.0.0.0:8080->80/tcp
+k5-day14-scaling-redis-1   Up 47 seconds (healthy)   6379/tcp
+```
+
+Nginx (cổng 8080) phân request cho 3 instance; chỉ Nginx mở cổng ra ngoài.
+
+### Exercise 5.5: Test stateless
+
+```text
+$ python3 test_stateless.py
+Session ID: 4138d272-f92e-4f57-808b-1e5a5e409917
+Request 1: [instance-248748]
+Request 2: [instance-2bd16c]
+Request 3: [instance-9b9705]
+Request 4: [instance-248748]
+Request 5: [instance-2bd16c]
+Instances used: {'instance-2bd16c', 'instance-9b9705', 'instance-248748'}
+Total messages: 10
+✅ Session history preserved across all instances via Redis!
+```
+
+5 request đi qua 3 instance theo vòng, history vẫn đủ 10 message.
+
+**Tắt một instance rồi hỏi tiếp** (`test_stateless.py` không tự làm bước này; chạy bằng script, session mới):
+
+```text
+Session ID: 37d70deb-b5f3-414a-aa38-91284557e2c9   (5 câu đầu, count = 10)
+$ docker kill k5-day14-scaling-agent-1             # instance-af9111, đã xử lý request 2 và 5
+k5-day14-scaling-agent-1   Exited (137)
+k5-day14-scaling-agent-2   Up (healthy)
+k5-day14-scaling-agent-3   Up (healthy)
+
+$ POST /chat "Still there?" cùng session_id
+{"session_id":"37d70deb-...","turn":7,"served_by":"instance-3c2480","storage":"redis", ...}
+HTTP 200 time 0.151710s
+
+$ GET /chat/37d70deb-.../history
+{"session_id":"37d70deb-...","messages":[...],"count":12}
+HTTP 200 time 60.191262s
+```
+
+- Instance khác phục vụ tiếp và history còn đủ 12 message: state nằm trong Redis, không phụ thuộc instance bị tắt.
+- Request `GET` mất **60,2 giây**, trùng với `proxy_connect_timeout` mặc định 60 giây của Nginx. Nguyên nhân nhiều khả năng (chưa kiểm tra log Nginx): `nginx.conf` phân giải `agent` lúc khởi động và không đặt timeout kết nối, nên Nginx vẫn thử IP của container đã chết, hết thời gian chờ mới chuyển sang instance khác. Có thể giảm bằng `proxy_connect_timeout` ngắn và `server agent:8000 resolve`.
+- `turn` báo 7 cho câu hỏi thứ 6: history được đọc sau khi đã thêm câu hiện tại rồi vẫn cộng 1 (`production/app.py` 154).
+
 ## AI log
 
 | Hỏi gì | Nhận gì | Tôi tự sửa và kiểm tra thế nào |
@@ -432,3 +548,4 @@ $ curl -s http://localhost:8000/me/usage -H "Authorization: Bearer $TOKEN"; echo
 | Nhờ Claude kiểm tra và hoàn thiện Part 1 | Claude đề xuất thí nghiệm SIGTERM; soạn Exercise 1.1, 1.2, 1.3 (bảng, nhận xét, phân tích lỗi) từ code trong repo và output tôi chạy | Tự chạy các lệnh và thí nghiệm trong WSL. |
 | Nhờ Claude hoàn thiện Part 2 | Claude soạn Exercise 2.1–2.4 (câu trả lời, bảng kích thước, sơ đồ, nhận xét) từ code trong repo và output tôi chạy; Claude chạy `docker history` trên máy này để phân tích layer | Tự chạy build, container và Docker Compose trong WSL. |
 | Hỏi Claude cách chạy Part 4, sửa lỗi chạy nhầm server, và soạn bài | Claude chỉ ra server đang chạy sai thư mục; soạn Exercise 4.1–4.4 từ code trong repo và output tôi chạy | Tự chạy các lệnh curl cho bản develop và production trong WSL. |
+| Nhờ Claude tự thực hiện phần còn lại của Part 5 và soạn bài | Claude viết script cho thí nghiệm SIGTERM (5.2) và kill instance (5.5), chạy thử trên máy này; soạn Exercise 5.1–5.5 | Tự chạy health/ready, Docker Compose 3 instance, `test_stateless.py` và tự chạy lại script; số liệu 5.2 và phần kill instance lấy từ lần tôi chạy. |
