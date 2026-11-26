@@ -9,10 +9,13 @@ Bản khung này chạy được (uvicorn app.main:app) nhưng chưa đạt tiê
 import logging
 import time
 
+import redis
 from fastapi import Depends, FastAPI, HTTPException, Request
-from pydantic import BaseModel, Field
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.auth import verify_api_key
+from app.cost_guard import check_budget, estimate_tokens, record_cost
 from app.logging_config import setup_logging
 from app.rate_limiter import check_rate_limit
 from app.redis_client import redis_healthy
@@ -28,21 +31,32 @@ app = FastAPI(title="Production AI Agent")
 async def log_requests(request: Request, call_next):
     """Mỗi request một dòng log. Không ghi header, query hay body để tránh lộ secret."""
     start = time.perf_counter()
-    status = 500  # giữ nguyên nếu handler ném exception
     try:
         response = await call_next(request)
-        status = response.status_code
-        return response
-    finally:
-        logger.info("request", extra={"fields": {
-            "method": request.method,
-            "path": request.url.path,
-            "status": status,
-            "ms": round((time.perf_counter() - start) * 1000, 1),
-        }})
+    except Exception:
+        # Lỗi không lường trước: stack trace chỉ ghi vào log, client nhận thông báo chung
+        logger.exception("unhandled_error", extra={"fields": {"path": request.url.path}})
+        response = JSONResponse(status_code=500, content={"detail": "Internal server error"})
+    logger.info("request", extra={"fields": {
+        "method": request.method,
+        "path": request.url.path,
+        "status": response.status_code,
+        "ms": round((time.perf_counter() - start) * 1000, 1),
+    }})
+    return response
+
+
+@app.exception_handler(redis.RedisError)
+def redis_unavailable(request: Request, exc: redis.RedisError):
+    """Mất Redis thì không kiểm tra được rate limit và ngân sách: từ chối bằng 503."""
+    logger.error("redis_error", extra={"fields": {"error": type(exc).__name__}})
+    return JSONResponse(status_code=503, content={"detail": "Service temporarily unavailable"})
 
 
 class AskRequest(BaseModel):
+    # Cắt khoảng trắng trước khi kiểm tra, nên câu hỏi toàn dấu cách bị từ chối (422)
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     question: str = Field(..., min_length=1, max_length=2000)
 
 
@@ -63,8 +77,16 @@ def ready():
 @app.post("/ask")
 def ask(body: AskRequest, api_key: str = Depends(verify_api_key)):
     check_rate_limit(api_key)
-    # TODO (tiêu chí 8): check_budget() trước khi gọi LLM, record_cost(...) sau khi gọi → 402 khi hết budget
+    check_budget()
     answer = llm_ask(body.question)
+    input_tokens = estimate_tokens(body.question)
+    output_tokens = estimate_tokens(answer)
+    cost = record_cost(input_tokens, output_tokens)
+    logger.info("llm_call", extra={"fields": {
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "cost_usd": round(cost, 8),
+    }})
     return {"question": body.question, "answer": answer}
 
 
