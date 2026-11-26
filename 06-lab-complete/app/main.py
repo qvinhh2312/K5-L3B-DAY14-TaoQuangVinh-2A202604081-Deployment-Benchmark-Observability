@@ -1,13 +1,15 @@
 """
-Production AI Agent — Part 6 Final Project (bản khung)
+Production AI Agent — Part 6 Final Project.
 
-Hoàn thành các TODO để đạt đủ 12 tiêu chí trong README.md, rồi kiểm tra:
-    python check_production_ready.py
+Luồng của POST /ask: API key → rate limit → ngân sách → LLM → ghi chi phí.
+State (rate limit, chi phí) nằm trong Redis, process không giữ state.
 
-Bản khung này chạy được (uvicorn app.main:app) nhưng chưa đạt tiêu chí nào.
+Chạy:  uvicorn app.main:app
+Kiểm tra:  python check_production_ready.py
 """
 import logging
 import time
+from contextlib import asynccontextmanager
 
 import redis
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -15,16 +17,31 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.auth import verify_api_key
+from app.config import settings
 from app.cost_guard import check_budget, estimate_tokens, record_cost
 from app.logging_config import setup_logging
 from app.rate_limiter import check_rate_limit
-from app.redis_client import redis_healthy
+from app.redis_client import r, redis_healthy
 from utils.mock_llm import ask as llm_ask
 
 setup_logging()
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Production AI Agent")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Graceful shutdown. Khi nhận SIGTERM, uvicorn ngừng nhận kết nối mới, chờ các
+    request đang chạy xong rồi mới chạy phần sau `yield`. Không tự đăng ký signal
+    handler để không ghi đè handler của uvicorn.
+    """
+    logger.info("startup", extra={"fields": {"environment": settings.environment}})
+    yield
+    r.close()  # đóng kết nối Redis sau khi request cuối cùng đã xong
+    logger.info("shutdown")
+
+
+app = FastAPI(title="Production AI Agent", lifespan=lifespan)
 
 
 @app.middleware("http")
@@ -88,9 +105,3 @@ def ask(body: AskRequest, api_key: str = Depends(verify_api_key)):
         "cost_usd": round(cost, 8),
     }})
     return {"question": body.question, "answer": answer}
-
-
-# TODO (tiêu chí 11 — Graceful shutdown):
-#   Khi nhận SIGTERM: ngừng nhận request mới, xử lý xong request đang chạy rồi thoát (exit code 0).
-#   Gợi ý: dùng lifespan của FastAPI để dọn dẹp. Nếu tự đăng ký signal handler cho SIGTERM thì
-#   phải gọi lại handler cũ của uvicorn, nếu không process sẽ không bao giờ tắt.
