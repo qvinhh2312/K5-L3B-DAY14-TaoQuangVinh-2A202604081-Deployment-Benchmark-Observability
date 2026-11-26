@@ -165,9 +165,143 @@ INFO:     Finished server process [2293]
 
 Thí nghiệm gửi SIGTERM sau khi request đã trả về, nên **chưa kiểm chứng** việc giữ request đang chạy. Cả hai bản đều tắt gọn qua uvicorn (bản develop mới thử bằng Ctrl+C), nên khác biệt quan sát được là bản production có thêm bước dọn dẹp và log, không phải "tắt đột ngột" so với "tắt êm".
 
+## Part 2: Docker
+
+### Exercise 2.1: Dockerfile questions
+
+File xét: `02-docker/develop/Dockerfile`.
+
+1. **Base image:** `python:3.11` (dòng 8), bản Python đầy đủ trên Debian, kèm nhiều công cụ build nên rất lớn.
+2. **Working directory:** `/app` (dòng 11). Các lệnh `COPY`, `RUN`, `CMD` phía sau chạy tương đối so với thư mục này.
+3. **Vì sao copy `requirements.txt` trước** (dòng 14–17): Docker cache theo layer. Khi chỉ sửa code, layer `requirements.txt` và `pip install` không đổi nên được dùng lại, không phải tải lại thư viện. Nếu copy toàn bộ code trước, mỗi lần sửa code là `pip install` chạy lại.
+4. **`CMD` khác `ENTRYPOINT`:** `CMD` là lệnh mặc định, bị thay khi truyền lệnh sau tên image trong `docker run`. `ENTRYPOINT` là chương trình cố định, tham số truyền vào được nối phía sau (muốn thay phải dùng `--entrypoint`). Hai lệnh có thể kết hợp: `ENTRYPOINT` là chương trình, `CMD` là tham số mặc định. File này dùng `CMD ["python", "app.py"]` (dòng 30) ở dạng exec, nên Python là PID 1 và nhận được tín hiệu dừng.
+
+Build từ gốc repo nên các đường dẫn `COPY` tính từ gốc, và Docker dùng `.dockerignore` ở gốc repo.
+
+### Exercise 2.2: Build và run
+
+```text
+$ docker build -f 02-docker/develop/Dockerfile -t my-agent:develop .
+$ docker run -d --rm --name agent-dev -p 8000:8000 my-agent:develop
+$ curl -i -X POST "http://localhost:8000/ask?question=What%20is%20Docker"; echo
+HTTP/1.1 200 OK
+date: Thu, 26 Nov 2026 08:46:43 GMT
+server: uvicorn
+content-length: 103
+content-type: application/json
+
+{"answer":"Container là cách đóng gói app để chạy ở mọi nơi. Build once, run anywhere!"}
+```
+
+### Exercise 2.3: Image size comparison
+
+```text
+$ docker images | grep my-agent
+                                       DISK USAGE   CONTENT SIZE
+my-agent:advanced     ab708d20bb9e          240MB         57.4MB
+my-agent:develop      1e4def837a25         1.67GB          426MB
+```
+
+| Image | Disk usage | Content size (nén) |
+|---|---|---|
+| Develop | 1670 MB | 426 MB |
+| Production | 240 MB | 57.4 MB |
+| Chênh lệch | giảm 85,6% | giảm 86,5% |
+
+**Hai stage trong `02-docker/production/Dockerfile`**
+
+- **Stage 1 `builder`** (dòng 16–29): từ `python:3.11-slim`, cài `gcc`, `libpq-dev`, rồi `pip install --user` vào `/root/.local`.
+- **Stage 2 `runtime`** (dòng 36–72): bắt đầu lại từ `python:3.11-slim` sạch, tạo user `appuser`, chỉ copy thư viện đã cài và code, chạy non-root, có `HEALTHCHECK`, uvicorn 2 worker.
+
+**Vì sao image nhỏ hơn** (theo `docker history`)
+
+| Thành phần | Develop | Production |
+|---|---|---|
+| Layer của base image (các layer chính) | 696 MB, 202 MB, 134 MB, 70.6 MB, 65 MB, 19.8 MB | 87.7 MB, 48.9 MB, 4.93 MB |
+| Thư viện Python | 53.3 MB (`pip install`) | 40.8 MB (`COPY --from=builder`) |
+
+- Phần giảm lớn nhất đến từ việc đổi base image `python:3.11` sang `python:3.11-slim`.
+- Multi-stage giữ `gcc`, `libpq-dev` ở stage `builder`: `docker history` của image production không có layer nào cài chúng. Image cuối vì vậy nhỏ hơn và ít công cụ có thể bị lợi dụng hơn.
+
+### Exercise 2.4: Docker Compose stack
+
+```text
+Client
+  │ http://localhost:80
+  ▼
+┌────────────────────── network "internal" (bridge) ──────────────────────┐
+│  nginx :80  ──proxy──▶  agent :8000 (1 container, 2 uvicorn worker)     │
+│                            ┊ depends_on, REDIS_URL, QDRANT_URL          │
+│                            ┊                                            │
+│                  redis :6379          qdrant :6333                      │
+│                  (volume redis_data)  (volume qdrant_data)              │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+**Kết quả chạy**
+
+```text
+$ docker compose -p k5-day14-docker -f 02-docker/production/docker-compose.yml up -d --build
+ ✔ Container k5-day14-docker-redis-1  Healthy
+ ✔ Container k5-day14-docker-qdrant-1 Healthy
+ ✔ Container k5-day14-docker-agent-1  Started
+ ✔ Container k5-day14-docker-nginx-1  Started
+
+$ docker compose -p k5-day14-docker -f 02-docker/production/docker-compose.yml ps
+SERVICE   STATUS                            PORTS
+agent     Up 2 seconds (health: starting)   8000/tcp
+nginx     Up 2 seconds                      0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp
+qdrant    Up 13 seconds (healthy)           6333-6334/tcp
+redis     Up 13 seconds (healthy)           6379/tcp
+```
+
+**Test qua Nginx** (output lược bớt vài header)
+
+```text
+$ curl -i http://localhost/health; echo
+HTTP/1.1 200 OK
+Server: nginx
+X-Frame-Options: DENY
+X-Content-Type-Options: nosniff
+
+{"status":"ok","uptime_seconds":9.5,"version":"2.0.0","timestamp":"2026-11-26T08:49:48.676788"}
+
+$ curl -i -X POST http://localhost/ask -H "Content-Type: application/json" -d '{"question":"Explain microservices"}'; echo
+HTTP/1.1 200 OK
+Server: nginx
+
+{"answer":"Đây là câu trả lời từ AI agent (mock). Trong production, đây sẽ là response từ OpenAI/Anthropic."}
+```
+
+**Log**
+
+```text
+agent-1  | INFO:     Started parent process [1]
+agent-1  | INFO:     Started server process [9]
+agent-1  | INFO:     Started server process [8]
+agent-1  | {"time":"2026-11-26 08:49:53,618","level":"INFO","msg":"{"event": "request", "q_len": 21}"}
+agent-1  | INFO:     172.20.0.5:56328 - "POST /ask HTTP/1.1" 200 OK
+nginx-1  | 172.20.0.1 - - [26/Nov/2026:08:49:53 +0000] "POST /ask HTTP/1.1" 200 126 "-" "curl/8.5.0"
+```
+
+**Services và cách giao tiếp**
+
+- 4 service được start: `agent`, `redis`, `qdrant`, `nginx`. `redis` và `qdrant` phải `healthy` thì `agent` mới start (`depends_on`).
+- Các service gọi nhau bằng tên service qua DNS nội bộ của Docker trong network `internal`.
+- Chỉ `nginx` mở cổng ra máy host. Request đi `client → nginx → agent`.
+- Nginx giới hạn 10 request/giây mỗi IP cho `location /` (không áp dụng cho `/health`) và thêm security header.
+
+**Chỗ cấu hình chưa khớp**
+
+- Ghi chú đầu file compose nói agent có 2 replica, nhưng không có `replicas` nên chỉ chạy 1 container; 2 tiến trình trong log là 2 worker của uvicorn.
+- Compose truyền `REDIS_URL`, `QDRANT_URL`, nhưng `main.py` không dùng Redis hay Qdrant.
+- Cổng 443 được map nhưng `nginx.conf` chỉ `listen 80`, nên chưa có HTTPS.
+- Dòng log `request` không phải JSON hợp lệ, cùng lỗi như ở Part 1.
+
 ## AI log
 
 | Hỏi gì | Nhận gì | Tôi tự sửa và kiểm tra thế nào |
 |---|---|---|
 | Hỏi Claude kiểm tra lệnh khớp bài chưa | Đã khớp; gán giúp lệnh chạy | Tự chạy các lệnh trong WSL.  |
 | Nhờ Claude kiểm tra và hoàn thiện Part 1 | Claude đề xuất thí nghiệm SIGTERM; soạn Exercise 1.1, 1.2, 1.3 (bảng, nhận xét, phân tích lỗi) từ code trong repo và output tôi chạy | Tự chạy các lệnh và thí nghiệm trong WSL. |
+| Nhờ Claude hoàn thiện Part 2 | Claude soạn Exercise 2.1–2.4 (câu trả lời, bảng kích thước, sơ đồ, nhận xét) từ code trong repo và output tôi chạy; Claude chạy `docker history` trên máy này để phân tích layer | Tự chạy build, container và Docker Compose trong WSL. |
